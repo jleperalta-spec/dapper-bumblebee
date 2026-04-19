@@ -3,9 +3,14 @@ const ctx = canvas.getContext('2d');
 
 const params = new URLSearchParams(window.location.search);
 const character = params.get('character') || 'peppa';
+const level     = Math.min(10, Math.max(1, parseInt(params.get('level') || '1', 10)));
+const levelT    = (level - 1) / 9; // 0 at L1, 1 at L10
 
 // --- Config ---
-const GRAVITY      = 0.28;
+const GRAVITY      = 0.04 + levelT * 0.44;  // 0.04 (L1) → 0.48 (L10)
+const INIT_VX_BASE = 0.4  + levelT * 4.0;   // 0.4  → 4.4
+const INIT_VX_RAND = 0.3  + levelT * 2.0;   // 0.3  → 2.3
+const INIT_VY      = 0.5  + levelT * 2.0;   // 0.5  → 2.5
 const PADDLE_SPEED = 9;
 const PADDLE_W     = 110;
 const PADDLE_H     = 20;
@@ -17,6 +22,7 @@ let paddleX, balloonX, balloonY, balloonVX, balloonVY;
 let score = 0;
 let highScore = 0;
 let gameOver = false;
+let musicStarted = false;
 let keys = {};
 let frameCount = 0;
 let charSprite = null;
@@ -38,6 +44,54 @@ function playPop(score) {
   gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
   osc.start(audioCtx.currentTime);
   osc.stop(audioCtx.currentTime + 0.22);
+}
+
+function startMusic() {
+  if (musicStarted) return;
+  musicStarted = true;
+
+  const master = audioCtx.createGain();
+  master.gain.value = 0.11;
+  master.connect(audioCtx.destination);
+
+  // C major pentatonic melody (8 notes, loops forever)
+  const melody = [523.25, 659.25, 783.99, 659.25, 587.33, 783.99, 880.00, 783.99];
+  const bass   = [130.81, 130.81, 196.00, 196.00, 130.81, 130.81, 196.00, 196.00];
+  const beat   = 0.38;
+  let nextTime = audioCtx.currentTime + 0.05;
+  let idx = 0;
+
+  function scheduleNote(freq, bassFreq, t) {
+    const osc = audioCtx.createOscillator();
+    const g   = audioCtx.createGain();
+    osc.connect(g); g.connect(master);
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(0.7, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + beat * 0.78);
+    osc.start(t); osc.stop(t + beat * 0.8);
+
+    const bOsc = audioCtx.createOscillator();
+    const bG   = audioCtx.createGain();
+    bOsc.connect(bG); bG.connect(master);
+    bOsc.type = 'sine';
+    bOsc.frequency.value = bassFreq;
+    bG.gain.setValueAtTime(0.28, t);
+    bG.gain.exponentialRampToValueAtTime(0.001, t + beat * 0.88);
+    bOsc.start(t); bOsc.stop(t + beat * 0.9);
+  }
+
+  function tick() {
+    while (nextTime < audioCtx.currentTime + 0.2) {
+      scheduleNote(melody[idx % melody.length], bass[idx % bass.length], nextTime);
+      nextTime += beat;
+      idx++;
+    }
+    setTimeout(tick, 80);
+  }
+
+  tick();
 }
 
 // --- Character SVGs ---
@@ -94,6 +148,118 @@ const SUZY_SVG = `<svg width="110" height="120" viewBox="0 0 180 220" xmlns="htt
   <path d="M76 106 Q90 118 104 106" stroke="#CC6677" stroke-width="3" fill="none" stroke-linecap="round"/>
 </svg>`;
 
+const MICKEY_SVG = `<svg width="110" height="120" viewBox="0 0 180 220" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="42" cy="44" r="36" fill="#111"/>
+  <circle cx="138" cy="44" r="36" fill="#111"/>
+  <circle cx="90" cy="100" r="58" fill="#111"/>
+  <ellipse cx="90" cy="107" rx="46" ry="44" fill="#FFDBA4"/>
+  <ellipse cx="72" cy="88" rx="9" ry="11" fill="#111"/>
+  <ellipse cx="108" cy="88" rx="9" ry="11" fill="#111"/>
+  <circle cx="74" cy="85" r="3.5" fill="#fff"/>
+  <circle cx="110" cy="85" r="3.5" fill="#fff"/>
+  <ellipse cx="90" cy="114" rx="12" ry="9" fill="#111"/>
+  <path d="M70 126 Q90 145 110 126" stroke="#111" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <ellipse cx="90" cy="178" rx="46" ry="48" fill="#CC0000"/>
+  <circle cx="83" cy="157" r="5" fill="#FFD700"/>
+  <circle cx="97" cy="157" r="5" fill="#FFD700"/>
+  <circle cx="26" cy="166" r="20" fill="#fff"/>
+  <circle cx="154" cy="166" r="20" fill="#fff"/>
+  <rect x="66" y="210" width="20" height="28" rx="10" fill="#111"/>
+  <rect x="94" y="210" width="20" height="28" rx="10" fill="#111"/>
+  <ellipse cx="76" cy="234" rx="18" ry="11" fill="#FFD700"/>
+  <ellipse cx="104" cy="234" rx="18" ry="11" fill="#FFD700"/>
+</svg>`;
+
+const MINNIE_SVG = `<svg width="110" height="120" viewBox="0 0 180 220" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="65" cy="18" rx="28" ry="18" fill="#CC0000" transform="rotate(-15 65 18)"/>
+  <ellipse cx="115" cy="18" rx="28" ry="18" fill="#CC0000" transform="rotate(15 115 18)"/>
+  <circle cx="90" cy="18" r="13" fill="#CC0000"/>
+  <circle cx="55" cy="12" r="3.5" fill="#FF8080"/>
+  <circle cx="68" cy="23" r="3" fill="#FF8080"/>
+  <circle cx="125" cy="12" r="3.5" fill="#FF8080"/>
+  <circle cx="112" cy="23" r="3" fill="#FF8080"/>
+  <circle cx="42" cy="50" r="34" fill="#111"/>
+  <circle cx="138" cy="50" r="34" fill="#111"/>
+  <circle cx="90" cy="106" r="56" fill="#111"/>
+  <ellipse cx="90" cy="112" rx="45" ry="43" fill="#FFDBA4"/>
+  <ellipse cx="72" cy="92" rx="9" ry="11" fill="#111"/>
+  <ellipse cx="108" cy="92" rx="9" ry="11" fill="#111"/>
+  <circle cx="74" cy="89" r="3.5" fill="#fff"/>
+  <circle cx="110" cy="89" r="3.5" fill="#fff"/>
+  <line x1="64" y1="82" x2="60" y2="76" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+  <line x1="69" y1="80" x2="67" y2="74" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+  <line x1="75" y1="80" x2="75" y2="74" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+  <line x1="100" y1="80" x2="100" y2="74" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+  <line x1="106" y1="80" x2="104" y2="74" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+  <line x1="111" y1="82" x2="115" y2="76" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+  <ellipse cx="90" cy="118" rx="12" ry="9" fill="#111"/>
+  <path d="M70 130 Q90 149 110 130" stroke="#111" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <ellipse cx="90" cy="178" rx="46" ry="48" fill="#E91E8C"/>
+  <circle cx="75" cy="162" r="5" fill="#fff" opacity="0.6"/>
+  <circle cx="93" cy="170" r="4" fill="#fff" opacity="0.6"/>
+  <circle cx="80" cy="180" r="3.5" fill="#fff" opacity="0.6"/>
+  <rect x="66" y="210" width="20" height="28" rx="10" fill="#111"/>
+  <rect x="94" y="210" width="20" height="28" rx="10" fill="#111"/>
+  <ellipse cx="76" cy="234" rx="18" ry="11" fill="#111"/>
+  <ellipse cx="104" cy="234" rx="18" ry="11" fill="#111"/>
+</svg>`;
+
+const BLUEY_SVG = `<svg width="110" height="120" viewBox="0 0 180 220" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="90" cy="168" rx="46" ry="52" fill="#4A90D9"/>
+  <ellipse cx="38" cy="158" rx="16" ry="10" fill="#5A9FE9" transform="rotate(-30 38 158)"/>
+  <ellipse cx="142" cy="158" rx="16" ry="10" fill="#5A9FE9" transform="rotate(30 142 158)"/>
+  <rect x="68" y="210" width="18" height="26" rx="9" fill="#3A7BC8"/>
+  <rect x="94" y="210" width="18" height="26" rx="9" fill="#3A7BC8"/>
+  <ellipse cx="77" cy="234" rx="14" ry="9" fill="#F5DEB3"/>
+  <ellipse cx="103" cy="234" rx="14" ry="9" fill="#F5DEB3"/>
+  <circle cx="90" cy="92" r="54" fill="#4A90D9"/>
+  <ellipse cx="90" cy="100" rx="40" ry="36" fill="#F0F0E8"/>
+  <ellipse cx="46" cy="62" rx="18" ry="26" fill="#4A90D9" transform="rotate(10 46 62)"/>
+  <ellipse cx="134" cy="62" rx="18" ry="26" fill="#4A90D9" transform="rotate(-10 134 62)"/>
+  <ellipse cx="46" cy="64" rx="11" ry="18" fill="#D4821E" transform="rotate(10 46 64)"/>
+  <ellipse cx="134" cy="64" rx="11" ry="18" fill="#D4821E" transform="rotate(-10 134 64)"/>
+  <ellipse cx="72" cy="82" rx="16" ry="14" fill="#D4821E"/>
+  <ellipse cx="108" cy="82" rx="16" ry="14" fill="#D4821E"/>
+  <circle cx="72" cy="82" r="9" fill="#fff"/>
+  <circle cx="108" cy="82" r="9" fill="#fff"/>
+  <circle cx="74" cy="82" r="5" fill="#222"/>
+  <circle cx="110" cy="82" r="5" fill="#222"/>
+  <circle cx="75" cy="80" r="2" fill="#fff"/>
+  <circle cx="111" cy="80" r="2" fill="#fff"/>
+  <ellipse cx="90" cy="112" rx="24" ry="18" fill="#F0EAD0"/>
+  <ellipse cx="90" cy="105" rx="8" ry="6" fill="#333"/>
+  <path d="M74 120 Q90 132 106 120" stroke="#aaa" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M80 46 Q90 32 100 46" stroke="#D4821E" stroke-width="8" fill="none" stroke-linecap="round"/>
+</svg>`;
+
+const BINGO_SVG = `<svg width="110" height="120" viewBox="0 0 180 220" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="90" cy="168" rx="46" ry="52" fill="#CC4A1A"/>
+  <ellipse cx="38" cy="158" rx="16" ry="10" fill="#D85A2A" transform="rotate(-30 38 158)"/>
+  <ellipse cx="142" cy="158" rx="16" ry="10" fill="#D85A2A" transform="rotate(30 142 158)"/>
+  <rect x="68" y="210" width="18" height="26" rx="9" fill="#A83A10"/>
+  <rect x="94" y="210" width="18" height="26" rx="9" fill="#A83A10"/>
+  <ellipse cx="77" cy="234" rx="14" ry="9" fill="#F5DEB3"/>
+  <ellipse cx="103" cy="234" rx="14" ry="9" fill="#F5DEB3"/>
+  <circle cx="90" cy="92" r="54" fill="#D85A2A"/>
+  <ellipse cx="90" cy="100" rx="40" ry="36" fill="#F5EDD8"/>
+  <ellipse cx="46" cy="62" rx="18" ry="26" fill="#D85A2A" transform="rotate(10 46 62)"/>
+  <ellipse cx="134" cy="62" rx="18" ry="26" fill="#D85A2A" transform="rotate(-10 134 62)"/>
+  <ellipse cx="46" cy="64" rx="11" ry="18" fill="#8B2500" transform="rotate(10 46 64)"/>
+  <ellipse cx="134" cy="64" rx="11" ry="18" fill="#8B2500" transform="rotate(-10 134 64)"/>
+  <ellipse cx="72" cy="82" rx="16" ry="14" fill="#8B2500"/>
+  <ellipse cx="108" cy="82" rx="16" ry="14" fill="#8B2500"/>
+  <circle cx="72" cy="82" r="9" fill="#fff"/>
+  <circle cx="108" cy="82" r="9" fill="#fff"/>
+  <circle cx="74" cy="82" r="5" fill="#222"/>
+  <circle cx="110" cy="82" r="5" fill="#222"/>
+  <circle cx="75" cy="80" r="2" fill="#fff"/>
+  <circle cx="111" cy="80" r="2" fill="#fff"/>
+  <ellipse cx="90" cy="112" rx="24" ry="18" fill="#F5EDD8"/>
+  <ellipse cx="90" cy="105" rx="8" ry="6" fill="#333"/>
+  <path d="M74 120 Q90 132 106 120" stroke="#aaa" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M80 46 Q90 32 100 46" stroke="#8B2500" stroke-width="8" fill="none" stroke-linecap="round"/>
+</svg>`;
+
 function buildSprite(svgStr) {
   return new Promise(resolve => {
     const blob = new Blob([svgStr], { type: 'image/svg+xml' });
@@ -110,8 +276,8 @@ function init(fresh = true) {
   if (fresh) {
     balloonX  = canvas.width  / 2;
     balloonY  = canvas.height * 0.25;
-    balloonVX = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 1.5);
-    balloonVY = 1.5;
+    balloonVX = (Math.random() > 0.5 ? 1 : -1) * (INIT_VX_BASE + Math.random() * INIT_VX_RAND);
+    balloonVY = INIT_VY;
   }
 }
 
@@ -130,8 +296,8 @@ function roundRect(c, x, y, w, h, r) {
   c.closePath();
 }
 
-const BALLOON_COLOR = { peppa: '#FF80AB', suzy: '#90CAF9' };
-const STRING_COLOR  = { peppa: '#CC3366', suzy: '#1565C0' };
+const BALLOON_COLOR = { peppa: '#FF80AB', suzy: '#90CAF9', mickey: '#FF5252', minnie: '#FF80C0', bluey: '#82B1FF', bingo: '#FFB74D' };
+const STRING_COLOR  = { peppa: '#CC3366', suzy: '#1565C0', mickey: '#990000', minnie: '#C2185B', bluey: '#1565C0', bingo: '#E65100' };
 const GRASS_H = 60;
 
 function drawBackground() {
@@ -257,7 +423,7 @@ function drawHint() {
   ctx.font = '16px "Comic Sans MS", cursive';
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.textAlign = 'center';
-  ctx.fillText('← → to move', canvas.width / 2, canvas.height - 8);
+  ctx.fillText(`← → to move  |  Level ${level}`, canvas.width / 2, canvas.height - 8);
   ctx.restore();
 }
 
@@ -315,7 +481,10 @@ canvas.addEventListener('click', e => {
 
 // Touch support for mobile
 let touchStartX = null;
-canvas.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+canvas.addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
+  audioCtx.resume().then(startMusic);
+}, { passive: true });
 canvas.addEventListener('touchmove', e => {
   if (touchStartX === null || gameOver) return;
   const dx = e.touches[0].clientX - touchStartX;
@@ -357,8 +526,10 @@ function update() {
   ) {
     balloonY  = paddleTop - BALLOON_RY;
     balloonVY = -(Math.abs(balloonVY) * 0.92 + 2.5);
-    balloonVX += (Math.random() - 0.5) * 2.5;
-    balloonVX  = Math.max(-6, Math.min(6, balloonVX));
+    const nudge = 0.6 + levelT * 2.0;
+    const maxVX = 1.2 + levelT * 4.8;
+    balloonVX += (Math.random() - 0.5) * nudge;
+    balloonVX  = Math.max(-maxVX, Math.min(maxVX, balloonVX));
     score++;
     if (score > highScore) highScore = score;
     playPop(score);
@@ -388,6 +559,7 @@ function loop() {
 // --- Input ---
 document.addEventListener('keydown', e => {
   keys[e.key] = true;
+  audioCtx.resume().then(startMusic);
   if (gameOver && e.key === ' ') init(true);
   if (['ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
 });
@@ -405,7 +577,8 @@ window.addEventListener('resize', () => {
 canvas.width  = window.innerWidth;
 canvas.height = window.innerHeight;
 
-buildSprite(character === 'suzy' ? SUZY_SVG : PEPPA_SVG).then(img => {
+const SVG_MAP = { peppa: PEPPA_SVG, suzy: SUZY_SVG, mickey: MICKEY_SVG, minnie: MINNIE_SVG, bluey: BLUEY_SVG, bingo: BINGO_SVG };
+buildSprite(SVG_MAP[character] || PEPPA_SVG).then(img => {
   charSprite = img;
   init(true);
   loop();
